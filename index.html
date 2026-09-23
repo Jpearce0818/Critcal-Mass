@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/": "https://esm.sh/three@^0.186.0/",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stellar Core - 3D Planet Puzzle</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #0b0b1a; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; }
+        canvas { display: block; touch-action: none; }
+        
+        #hud {
+            position: absolute; top: 20px; left: 20px; color: white; pointer-events: none; z-index: 20;
+            display: flex; flex-direction: column; gap: 4px;
+        }
+        #score { font-size: 28px; font-weight: 800; text-shadow: 0 0 12px rgba(255,255,255,0.6); }
+        #highScore { font-size: 16px; color: #ffca28; font-weight: 600; text-shadow: 0 0 8px rgba(255,202,40,0.5); }
+        #biomeIndicator { font-size: 14px; text-transform: uppercase; letter-spacing: 2px; color: #80deea; font-weight: bold; margin-top: 4px; }
+        
+        #muteBtn {
+            position: absolute; top: 20px; right: 20px;
+            background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white; font-size: 22px; padding: 10px 16px; border-radius: 12px;
+            cursor: pointer; z-index: 20; backdrop-filter: blur(8px);
+            transition: background 0.2s, transform 0.1s;
+        }
+        #muteBtn:hover { background: rgba(255, 255, 255, 0.25); transform: scale(1.05); }
+
+        #dangerOverlay {
+            position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+            pointer-events: none; z-index: 5;
+            box-shadow: inset 0 0 0px rgba(255, 0, 0, 0);
+            transition: box-shadow 0.1s;
+        }
+
+        .floating-popup {
+            position: absolute; pointer-events: none; z-index: 25; font-weight: 900;
+            text-shadow: 0 0 8px rgba(0,0,0,1), 0 0 15px currentColor;
+            transform: translate(-50%, -50%); transition: opacity 0.6s ease-out;
+            will-change: transform, opacity; letter-spacing: 1px;
+        }
+
+        .overlay {
+            position: absolute; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: radial-gradient(circle at center, rgba(16, 16, 40, 0.88) 0%, rgba(5, 5, 15, 0.96) 100%);
+            display: flex; flex-direction: column; justify-content: center; align-items: center; color: white;
+            z-index: 30; backdrop-filter: blur(10px);
+        }
+        
+        #gameOverScreen { display: none; }
+        
+        h1 {
+            font-size: 60px; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 6px;
+            text-shadow: 0 0 30px rgba(120, 180, 255, 0.6);
+            background: linear-gradient(45deg, #fff, #80deea); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        #gameOverScreen h1 {
+            background: linear-gradient(45deg, #ff4444, #ff8a80); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            text-shadow: 0 0 30px rgba(255, 68, 68, 0.6);
+        }
+        
+        p { font-size: 22px; margin: 0 0 32px 0; color: #b0bec5; font-weight: 300; }
+
+        button.gameBtn {
+            background: linear-gradient(135deg, #00e676, #00b0ff); color: white; border: none;
+            padding: 16px 44px; font-size: 22px; font-weight: 800; border-radius: 50px; cursor: pointer;
+            letter-spacing: 1px; transition: transform 0.15s, box-shadow 0.2s, filter 0.2s;
+            box-shadow: 0 10px 25px rgba(0, 230, 118, 0.35);
+        }
+        button.gameBtn:hover { transform: translateY(-2px) scale(1.03); box-shadow: 0 14px 30px rgba(0, 230, 118, 0.55); filter: brightness(1.1); }
+        button.gameBtn:active { transform: translateY(1px) scale(0.98); }
+    </style>
+    
+</head>
+<body>
+    <div id="dangerOverlay"></div>
+    <div id="hud">
+        <div id="score">Score: 0</div>
+        <div id="highScore">Best: 0</div>
+        <div id="biomeIndicator">Sector: Deep Cosmos</div>
+    </div>
+    <button id="muteBtn">🔊</button>
+    
+    <div id="startScreen" class="overlay">
+        <h1>Stellar Core</h1>
+        <p>Rotate the sphere. Match 2 or more before critical mass.</p>
+        <button id="startBtn" class="gameBtn">Initialize Sequence</button>
+    </div>
+
+    <div id="gameOverScreen" class="overlay">
+        <h1>Critical Mass</h1>
+        <p id="finalScore">Final Score: 0</p>
+        <button id="replayBtn" class="gameBtn">Replay Sequence</button>
+    </div>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+        // --- CONSTANTS & PERSISTENCE ---
+        const BLOCK_SIZE = 1.2;
+        const MAX_RADIUS = 6; 
+        
+        let score = 0;
+        let highScore = parseInt(localStorage.getItem('stellar_high_score') || '0', 10);
+        let isGameOver = true; 
+        let spawnIntervalTime = 1500; 
+        const MIN_INTERVAL = 300; 
+        let spawnerTimeoutId = null;
+        let blocks = []; 
+        let maxGridDist = 0; 
+
+        const highScoreElement = document.getElementById('highScore');
+        const biomeElement = document.getElementById('biomeIndicator');
+        highScoreElement.innerText = `Best: ${highScore}`;
+
+        // --- BIOMES DEFINITION ---
+        const BIOMES = {
+            COSMOS: { name: "Deep Cosmos", threshold: 0, fog: 0x0b0b1a, coreMat: { color: 0x222222, metalness: 0.5, roughness: 0.9 }, dustA: 0x00ffff, dustB: 0xff00ff, ring: 0x4444ff, bassKey: 41.20 },
+            NEON_ICE: { name: "Cryo Cluster", threshold: 800, fog: 0x051a24, coreMat: { color: 0x5c6bc0, metalness: 0.8, roughness: 0.2 }, dustA: 0x00e5ff, dustB: 0x76ff03, ring: 0x00e5ff, bassKey: 43.65 },
+            MAGMA: { name: "Inferno Rift", threshold: 2000, fog: 0x210808, coreMat: { color: 0xbf360c, metalness: 0.3, roughness: 0.6 }, dustA: 0xff3d00, dustB: 0xffd600, ring: 0xff1744, bassKey: 36.71 }
+        };
+        let currentBiome = BIOMES.COSMOS;
+
+        // --- SPACE FUNK AUDIO ENGINE ---
+        let audioCtx;
+        let audioSetupDone = false;
+        let isMuted = false;
+        let masterGain;
+        let seqTimeoutId = null;
+        let compressor;
+
+        const muteBtn = document.getElementById('muteBtn');
+        muteBtn.addEventListener('click', () => {
+            isMuted = !isMuted;
+            muteBtn.innerText = isMuted ? '🔇' : '🔊';
+            if (masterGain) {
+                masterGain.gain.setTargetAtTime(isMuted ? 0 : 0.6, audioCtx.currentTime, 0.1);
+            }
+        });
+
+        function forceAudioUnlock() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            gain.gain.value = 0; 
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start(0);
+            osc.stop(audioCtx.currentTime + 0.01);
+        }
+
+        ['mousedown', 'touchstart', 'keydown'].forEach(evt => {
+            window.addEventListener(evt, forceAudioUnlock, { once: true });
+        });
+
+        const pKick  = [1, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0];
+        const pSnare = [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0];
+        const pHat   = [1, 0, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 0];
+        const pChord = [0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0]; 
+
+        function createNoise(time, duration, filterFreq, type = 'highpass') {
+            const osc = audioCtx.createOscillator();
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(500, time);
+            osc.frequency.exponentialRampToValueAtTime(8000, time + duration);
+            const filter = audioCtx.createBiquadFilter();
+            filter.type = type;
+            filter.frequency.value = filterFreq;
+            const gain = audioCtx.createGain();
+            gain.gain.setValueAtTime(0.4, time);
+            gain.gain.exponentialRampToValueAtTime(0.01, time + duration);
+            osc.connect(filter);
+            filter.connect(gain);
+            gain.connect(compressor);
+            osc.start(time);
+            osc.stop(time + duration);
+        }
+
+        function playSpecialSound(type) {
+            if (!audioCtx || audioCtx.state !== 'running' || isMuted) return;
+            const t = audioCtx.currentTime;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(compressor);
+
+            if (type === 'combo') {
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(440, t);
+                osc.frequency.exponentialRampToValueAtTime(880, t + 0.3);
+                gain.gain.setValueAtTime(0.5, t);
+                gain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
+            }
+            osc.start(t);
+            osc.stop(t + 0.4);
+        }
+
+        function startSpaceFunk() {
+            if (seqTimeoutId) clearTimeout(seqTimeoutId);
+            let step = 0;
+
+            function playStep() {
+                if (isGameOver) return;
+
+                let dangerLevel = Math.max(0, maxGridDist - 1) / (MAX_RADIUS - 1);
+                dangerLevel = Math.min(1, dangerLevel); 
+                const curvedDanger = Math.pow(dangerLevel, 3);
+                const currentTempo = 280 - (curvedDanger * 200); 
+
+                if (audioCtx.state === 'running') {
+                    const t = audioCtx.currentTime;
+                    const baseKey = currentBiome.bassKey;
+                    const pBass = [baseKey, 0, 0, baseKey, baseKey * 2, 0, baseKey * 1.78, 0, baseKey * 1.5, 0, baseKey * 1.33, baseKey * 1.18, baseKey, 0, baseKey * 1.18, baseKey * 1.33];
+                    const chordNotes = [baseKey * 4, baseKey * 4.75, baseKey * 6, baseKey * 7.12];
+
+                    if (pKick[step]) {
+                        const kOsc = audioCtx.createOscillator();
+                        const kGain = audioCtx.createGain();
+                        kOsc.connect(kGain);
+                        kGain.connect(compressor);
+                        kOsc.frequency.setValueAtTime(140, t);
+                        kOsc.frequency.exponentialRampToValueAtTime(38, t + 0.1);
+                        kGain.gain.setValueAtTime(1.1, t);
+                        kGain.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
+                        kOsc.start(t);
+                        kOsc.stop(t + 0.2);
+                    }
+
+                    if (pSnare[step]) createNoise(t, 0.15, 1000 + (curvedDanger * 1000), 'bandpass');
+                    if (pHat[step]) createNoise(t, step % 2 === 0 ? 0.05 : 0.1, 6000 + (curvedDanger * 2000), 'highpass');
+
+                    if (pBass[step]) {
+                        const bOsc = audioCtx.createOscillator();
+                        bOsc.type = 'sawtooth';
+                        bOsc.frequency.value = pBass[step];
+                        const bFilter = audioCtx.createBiquadFilter();
+                        bFilter.type = 'lowpass';
+                        bFilter.frequency.setValueAtTime(400 + (curvedDanger * 2000), t);
+                        bFilter.frequency.exponentialRampToValueAtTime(100, t + 0.2);
+                        bFilter.Q.value = 5 + (curvedDanger * 10); 
+                        const bGain = audioCtx.createGain();
+                        bGain.gain.setValueAtTime(0.8, t);
+                        bGain.gain.exponentialRampToValueAtTime(0.01, t + 0.2);
+                        bOsc.connect(bFilter);
+                        bFilter.connect(bGain);
+                        bGain.connect(compressor);
+                        bOsc.start(t);
+                        bOsc.stop(t + 0.2);
+                    }
+
+                    if (pChord[step]) {
+                        const cGain = audioCtx.createGain();
+                        cGain.gain.setValueAtTime(0.25, t);
+                        cGain.gain.exponentialRampToValueAtTime(0.01, t + 0.3);
+                        const cFilter = audioCtx.createBiquadFilter();
+                        cFilter.type = 'lowpass';
+                        cFilter.frequency.setValueAtTime(800 + (curvedDanger * 3000), t);
+                        cFilter.connect(cGain);
+                        cGain.connect(compressor);
+
+                        chordNotes.forEach(freq => {
+                            const cOsc = audioCtx.createOscillator();
+                            cOsc.type = 'triangle';
+                            cOsc.frequency.value = freq;
+                            cOsc.connect(cFilter);
+                            cOsc.start(t);
+                            cOsc.stop(t + 0.3);
+                        });
+                    }
+                }
+
+                step = (step + 1) % 16;
+                seqTimeoutId = setTimeout(playStep, currentTempo);
+            }
+            playStep();
+        }
+
+        function initAudio() {
+            forceAudioUnlock(); 
+            if (audioSetupDone || !audioCtx) {
+                if (!isGameOver) startSpaceFunk();
+                return;
+            }
+            audioSetupDone = true;
+            masterGain = audioCtx.createGain();
+            masterGain.gain.value = isMuted ? 0 : 0.6; 
+            masterGain.connect(audioCtx.destination);
+
+            compressor = audioCtx.createDynamicsCompressor();
+            compressor.threshold.value = -10;
+            compressor.knee.value = 10;
+            compressor.ratio.value = 8;
+            compressor.attack.value = 0.01;
+            compressor.release.value = 0.1;
+            compressor.connect(masterGain);
+
+            startSpaceFunk();
+        }
+
+        // --- 1. SCENE SETUP ---
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(currentBiome.fog, 0.015);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 0, 30);
+        scene.add(camera); 
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.enableZoom = false; 
+        controls.enablePan = false;  
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        directionalLight.position.set(20, 30, 20);
+        directionalLight.castShadow = true;
+        directionalLight.shadow.mapSize.width = 2048;
+        directionalLight.shadow.mapSize.height = 2048;
+        camera.add(directionalLight); 
+
+        const fillLight = new THREE.DirectionalLight(0x5555ff, 0.8);
+        fillLight.position.set(-20, -20, -20);
+        camera.add(fillLight); 
+
+        function createCosmicDust(colorHex, size, count, radius) {
+            const geo = new THREE.BufferGeometry();
+            const pos = new Float32Array(count * 3);
+            for(let i = 0; i < count * 3; i += 3) {
+                const r = radius * Math.cbrt(Math.random());
+                const theta = Math.random() * 2 * Math.PI;
+                const phi = Math.acos(2 * Math.random() - 1);
+                pos[i] = r * Math.sin(phi) * Math.cos(theta);
+                pos[i+1] = r * Math.sin(phi) * Math.sin(theta);
+                pos[i+2] = r * Math.cos(phi);
+            }
+            geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+            const mat = new THREE.PointsMaterial({ 
+                size: size, color: colorHex, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending 
+            });
+            const mesh = new THREE.Points(geo, mat);
+            scene.add(mesh);
+            return mesh;
+        }
+
+        const dustLayers = [
+            createCosmicDust(currentBiome.dustA, 0.25, 1200, 180),
+            createCosmicDust(currentBiome.dustB, 0.25, 1200, 180),
+            createCosmicDust(0xffffff, 0.15, 2000, 250)
+        ];
+
+        const rings = [];
+        const ringGeo = new THREE.TorusGeometry(80, 0.1, 16, 100);
+        const ringMat = new THREE.MeshBasicMaterial({ color: currentBiome.ring, transparent: true, opacity: 0.15, wireframe: true });
+        
+        for(let i = 0; i < 3; i++) {
+            const rMesh = new THREE.Mesh(ringGeo, ringMat.clone());
+            rMesh.baseScale = 1 + (i * 0.2); 
+            rMesh.scale.setScalar(rMesh.baseScale);
+            rMesh.rotation.set(Math.random()*Math.PI, Math.random()*Math.PI, Math.random()*Math.PI);
+            scene.add(rMesh);
+            rings.push(rMesh);
+        }
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // --- 2. GAME LOGIC ARRAYS ---
+        const scoreElement = document.getElementById('score');
+        const startScreen = document.getElementById('startScreen');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const finalScoreElement = document.getElementById('finalScore');
+        const dangerOverlay = document.getElementById('dangerOverlay');
+        
+        const faceDirections = [
+            new THREE.Vector3(1, 0, 0), new THREE.Vector3(-1, 0, 0),
+            new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0),
+            new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 0, -1)
+        ];
+
+        const grid = new Map();
+        function getPosKey(x, y, z) { return `${Math.round(x)},${Math.round(y)},${Math.round(z)}`; }
+
+        // The Core
+        const coreGeometry = new THREE.BoxGeometry(BLOCK_SIZE, BLOCK_SIZE, BLOCK_SIZE);
+        const edgeGeometry = new THREE.EdgesGeometry(coreGeometry);
+        const edgeMaterial = new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.5, linewidth: 2 });
+
+        const coreMaterial = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.9, metalness: 0.5, emissive: 0x000000 });
+        const coreMesh = new THREE.Mesh(coreGeometry, coreMaterial);
+        const coreEdges = new THREE.LineSegments(edgeGeometry, edgeMaterial);
+        coreEdges.raycast = () => {}; 
+        coreMesh.add(coreEdges);
+        coreMesh.receiveShadow = true;
+        scene.add(coreMesh);
+
+        // --- 3. PARTICLES & FLOATING TEXTS ---
+        const particles = [];
+        const particleGeom = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+
+        function triggerExplosion(position, colorHex, particleCount = 6) {
+            const mat = new THREE.MeshStandardMaterial({ 
+                color: colorHex, roughness: 0.4, emissive: colorHex, emissiveIntensity: 0.4, transparent: true 
+            });
+            for(let i = 0; i < particleCount; i++) {
+                const p = new THREE.Mesh(particleGeom, mat);
+                p.position.copy(position);
+                p.velocity = new THREE.Vector3((Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 0.5);
+                p.rotationSpeed = new THREE.Vector3(Math.random()*0.2, Math.random()*0.2, Math.random()*0.2);
+                p.life = 1.0; 
+                scene.add(p);
+                particles.push(p);
+            }
+        }
+
+        // Updated Floating Popup: Smaller text, out of the way of the main cluster
+        function createFloatingPopup(text, position, color = '#ffffff', scale = 1) {
+            const el = document.createElement('div');
+            el.className = 'floating-popup';
+            el.innerText = text;
+            el.style.color = color;
+            // Base size drastically reduced from 20px to 11px
+            el.style.fontSize = `${11 * scale}px`;
+            document.body.appendChild(el);
+
+            const pos = position.clone();
+            let opacity = 1.0;
+            let currentYOffset = 0;
+            let currentXOffset = 0; // Added for horizontal drift
+
+            function updatePopup() {
+                if (opacity <= 0) {
+                    el.remove();
+                    return;
+                }
+                const screenPos = pos.clone().add(new THREE.Vector3(currentXOffset, currentYOffset, 0)).project(camera);
+                
+                // Add a permanent flat pixel offset (+45x, -45y) to push it diagonally out of the cursor/block's way
+                const x = ((screenPos.x * 0.5 + 0.5) * window.innerWidth) + 45;
+                const y = (-(screenPos.y * 0.5) + 0.5) * window.innerHeight - 45;
+
+                el.style.left = `${x}px`;
+                el.style.top = `${y}px`;
+                el.style.opacity = opacity;
+
+                currentYOffset += 0.04; 
+                currentXOffset += 0.02; // Causes the text to gently drift to the right over time
+                opacity -= 0.025;
+                requestAnimationFrame(updatePopup);
+            }
+            updatePopup();
+        }
+
+        // --- 4. BIOME LOGIC CHECK ---
+        function checkBiomeTransitions() {
+            let targetBiome = BIOMES.COSMOS;
+            if (score >= BIOMES.MAGMA.threshold) targetBiome = BIOMES.MAGMA;
+            else if (score >= BIOMES.NEON_ICE.threshold) targetBiome = BIOMES.NEON_ICE;
+
+            if (targetBiome !== currentBiome) {
+                currentBiome = targetBiome;
+                biomeElement.innerText = `Sector: ${currentBiome.name}`;
+                scene.fog.color.setHex(currentBiome.fog);
+                coreMesh.material.color.setHex(currentBiome.coreMat.color);
+                coreMesh.material.metalness = currentBiome.coreMat.metalness;
+                coreMesh.material.roughness = currentBiome.coreMat.roughness;
+                dustLayers[0].material.color.setHex(currentBiome.dustA);
+                dustLayers[1].material.color.setHex(currentBiome.dustB);
+                rings.forEach(r => r.material.color.setHex(currentBiome.ring));
+                createFloatingPopup(`Entering ${currentBiome.name}!`, new THREE.Vector3(0, 3, 0), '#80deea', 1.5);
+            }
+        }
+
+        // --- 5. SPAWNING ---
+        const allColors = [0xff2a2a, 0x2a2aff, 0x2aff2a, 0xffff2a, 0xff2aff, 0x2affff, 0xffaa2a, 0xffffff];
+
+        function getEmptySurfaceSpots() {
+            const spots = new Map();
+            for (const dir of faceDirections) {
+                const key = getPosKey(dir.x, dir.y, dir.z);
+                if (!grid.has(key)) spots.set(key, dir.clone());
+            }
+            for (const block of blocks) {
+                for (const dir of faceDirections) {
+                    const pos = block.gridPos.clone().add(dir);
+                    if (pos.x === 0 && pos.y === 0 && pos.z === 0) continue; 
+                    const key = getPosKey(pos.x, pos.y, pos.z);
+                    if (!grid.has(key)) spots.set(key, pos);
+                }
+            }
+            return Array.from(spots.values());
+        }
+
+        function triggerGameOver() {
+            if (isGameOver) return;
+            isGameOver = true;
+            clearTimeout(spawnerTimeoutId);
+            if (seqTimeoutId) clearTimeout(seqTimeoutId);
+            
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('stellar_high_score', highScore);
+                highScoreElement.innerText = `Best: ${highScore}`;
+            }
+
+            finalScoreElement.innerText = `Final Score: ${score}`;
+            gameOverScreen.style.display = 'flex';
+            dangerOverlay.style.boxShadow = `inset 0 0 0px rgba(255, 0, 0, 0)`;
+            coreMesh.material.emissiveIntensity = 0;
+            rings.forEach(r => r.material.color.setHex(currentBiome.ring));
+        }
+
+        function spawnBlock() {
+            if (isGameOver) return;
+
+            let activeColorCount = 3;
+            if (score >= 2500) activeColorCount = 8;
+            else if (score >= 1200) activeColorCount = 6;
+            else if (score >= 500) activeColorCount = 5;
+            else if (score >= 150) activeColorCount = 4;
+            
+            const surfaceSpots = getEmptySurfaceSpots();
+            if (surfaceSpots.length === 0) return; 
+            
+            const gridPos = surfaceSpots[Math.floor(Math.random() * surfaceSpots.length)];
+            const boundaryDist = Math.max(Math.abs(gridPos.x), Math.abs(gridPos.y), Math.abs(gridPos.z));
+            if (boundaryDist >= MAX_RADIUS) {
+                triggerGameOver();
+                return;
+            }
+
+            const colorIndex = Math.floor(Math.random() * activeColorCount);
+            const colorHex = allColors[colorIndex];
+
+            const material = new THREE.MeshStandardMaterial({ 
+                color: colorHex, 
+                roughness: 0.2, 
+                metalness: 0.1
+            });
+
+            const mesh = new THREE.Mesh(coreGeometry, material);
+            const blockEdges = new THREE.LineSegments(edgeGeometry, edgeMaterial);
+            blockEdges.raycast = () => {};
+            mesh.add(blockEdges);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            
+            const visualStart = gridPos.clone().normalize().multiplyScalar(40);
+            mesh.position.copy(visualStart); 
+            scene.add(mesh);
+
+            const block = {
+                mesh: mesh, 
+                gridPos: gridPos, 
+                targetPos: gridPos.clone().multiplyScalar(BLOCK_SIZE), 
+                colorIndex: colorIndex
+            };
+
+            blocks.push(block);
+            grid.set(getPosKey(gridPos.x, gridPos.y, gridPos.z), block);
+        }
+
+        // --- 6. INTERACTION & MATCH LOGIC ---
+        const raycaster = new THREE.Raycaster();
+        const pointer = new THREE.Vector2();
+        let isDragging = false;
+        let startX = 0, startY = 0;
+
+        window.addEventListener('pointerdown', (e) => {
+            if(e.target.id === 'muteBtn') return;
+            isDragging = false;
+            startX = e.clientX || (e.touches ? e.touches[0].clientX : 0);
+            startY = e.clientY || (e.touches ? e.touches[0].clientY : 0);
+        });
+
+        window.addEventListener('pointermove', (e) => {
+            const currentX = e.clientX || (e.touches ? e.touches[0].clientX : 0);
+            const currentY = e.clientY || (e.touches ? e.touches[0].clientY : 0);
+            if (Math.abs(currentX - startX) > 5 || Math.abs(currentY - startY) > 5) isDragging = true;
+        });
+
+        window.addEventListener('pointerup', (event) => {
+            if (isGameOver || isDragging || event.target.id === 'muteBtn') return; 
+
+            const clientX = event.clientX || (event.changedTouches ? event.changedTouches[0].clientX : 0);
+            const clientY = event.clientY || (event.changedTouches ? event.changedTouches[0].clientY : 0);
+            pointer.x = (clientX / window.innerWidth) * 2 - 1;
+            pointer.y = -(clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(pointer, camera);
+            const blockMeshes = blocks.map(b => b.mesh);
+            const intersects = raycaster.intersectObjects(blockMeshes);
+
+            if (intersects.length > 0) {
+                const clickedBlock = blocks.find(b => b.mesh === intersects[0].object);
+                if (clickedBlock) findAndDestroyMatches(clickedBlock, 1);
+            }
+        });
+
+        function findAndDestroyMatches(startBlock, comboMultiplier = 1) {
+            const matched = new Set();
+            const toCheck = [startBlock];
+            const targetColor = startBlock.colorIndex;
+
+            while (toCheck.length > 0) {
+                const current = toCheck.pop();
+                if (matched.has(current)) continue;
+                matched.add(current);
+
+                for (const dir of faceDirections) {
+                    const neighborPos = current.gridPos.clone().add(dir);
+                    const key = getPosKey(neighborPos.x, neighborPos.y, neighborPos.z);
+                    const neighborBlock = grid.get(key);
+                    
+                    if (neighborBlock && !matched.has(neighborBlock)) {
+                        if (neighborBlock.colorIndex === targetColor) {
+                            toCheck.push(neighborBlock);
+                        }
+                    }
+                }
+            }
+
+            if (matched.size >= 2) {
+                const count = matched.size;
+                const points = count * 10 * comboMultiplier;
+                score += points;
+
+                if (comboMultiplier > 1) {
+                    playSpecialSound('combo');
+                    // Multiplier scaled down significantly so text remains tiny but legible
+                    createFloatingPopup(`x${comboMultiplier}! +${points}`, startBlock.mesh.position, '#ffea00', 1.0 + comboMultiplier * 0.15);
+                } else {
+                    createFloatingPopup(`+${points}`, startBlock.mesh.position, '#ffffff', 1.0);
+                }
+
+                destroyBlockSet(Array.from(matched), comboMultiplier);
+            }
+        }
+
+        function destroyBlockSet(blockArray, comboMultiplier = 1) {
+            blockArray.forEach(b => {
+                triggerExplosion(b.mesh.position.clone(), allColors[b.colorIndex], 8);
+                scene.remove(b.mesh);
+                const key = getPosKey(b.gridPos.x, b.gridPos.y, b.gridPos.z);
+                grid.delete(key);
+                const index = blocks.indexOf(b);
+                if (index > -1) blocks.splice(index, 1);
+            });
+
+            scoreElement.innerText = `Score: ${score}`;
+            checkBiomeTransitions();
+            spawnIntervalTime = Math.max(MIN_INTERVAL, spawnIntervalTime * 0.95);
+
+            setTimeout(() => {
+                const hadMovement = applyDiscreteGravity();
+                if (hadMovement) {
+                    setTimeout(() => checkCascadingCombos(comboMultiplier + 1), 180);
+                }
+            }, 100);
+        }
+
+        function checkCascadingCombos(multiplier) {
+            for (const b of blocks) {
+                let sameColorNeighbors = 0;
+                for (const dir of faceDirections) {
+                    const neighborPos = b.gridPos.clone().add(dir);
+                    const n = grid.get(getPosKey(neighborPos.x, neighborPos.y, neighborPos.z));
+                    if (n && n.colorIndex === b.colorIndex) sameColorNeighbors++;
+                }
+                if (sameColorNeighbors >= 1) {
+                    findAndDestroyMatches(b, multiplier);
+                    break;
+                }
+            }
+        }
+
+        function applyDiscreteGravity() {
+            let anyMoved = false;
+            let moved = true;
+            let safetyGuard = 0; 
+            while(moved && safetyGuard < 100) {
+                moved = false;
+                safetyGuard++;
+                blocks.sort((a,b) => {
+                    const distA = Math.abs(a.gridPos.x) + Math.abs(a.gridPos.y) + Math.abs(a.gridPos.z);
+                    const distB = Math.abs(b.gridPos.x) + Math.abs(b.gridPos.y) + Math.abs(b.gridPos.z);
+                    return distA - distB; 
+                });
+
+                for (const block of blocks) {
+                    const currentDist = Math.abs(block.gridPos.x) + Math.abs(block.gridPos.y) + Math.abs(block.gridPos.z);
+                    let bestPos = null;
+                    let minNeighborDist = currentDist;
+
+                    for (const dir of faceDirections) {
+                        const neighborPos = block.gridPos.clone().add(dir);
+                        if (neighborPos.x === 0 && neighborPos.y === 0 && neighborPos.z === 0) continue;
+                        
+                        const neighborDist = Math.abs(neighborPos.x) + Math.abs(neighborPos.y) + Math.abs(neighborPos.z);
+                        if (neighborDist < minNeighborDist) {
+                            const key = getPosKey(neighborPos.x, neighborPos.y, neighborPos.z);
+                            if (!grid.has(key)) {
+                                minNeighborDist = neighborDist;
+                                bestPos = neighborPos;
+                            }
+                        }
+                    }
+
+                    if (bestPos) {
+                        const oldKey = getPosKey(block.gridPos.x, block.gridPos.y, block.gridPos.z);
+                        const newKey = getPosKey(bestPos.x, bestPos.y, bestPos.z);
+                        grid.delete(oldKey);
+                        grid.set(newKey, block);
+                        block.gridPos.copy(bestPos);
+                        block.targetPos.copy(bestPos).multiplyScalar(BLOCK_SIZE);
+                        moved = true;
+                        anyMoved = true;
+                    }
+                }
+            }
+            return anyMoved;
+        }
+
+        // --- 7. RENDER LOOP ---
+        const clock = new THREE.Clock();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            const time = clock.getElapsedTime();
+
+            let maxVisualDist = 1; 
+            maxGridDist = 0; 
+            
+            for (const block of blocks) {
+                const dist = block.targetPos.length();
+                if (dist > maxVisualDist) maxVisualDist = dist;
+                
+                const gDist = Math.max(Math.abs(block.gridPos.x), Math.abs(block.gridPos.y), Math.abs(block.gridPos.z));
+                if (gDist > maxGridDist) maxGridDist = gDist;
+            }
+
+            // Danger Calculations
+            let dangerLevel = Math.max(0, maxGridDist - 1) / (MAX_RADIUS - 1);
+            dangerLevel = Math.min(1, dangerLevel); 
+            
+            const baseColor = new THREE.Color(currentBiome.ring);
+            const dangerColor = new THREE.Color(0xff1111);
+            const currentRingColor = baseColor.clone().lerp(dangerColor, dangerLevel);
+
+            rings.forEach((r, idx) => {
+                r.material.color.copy(currentRingColor);
+                r.rotation.x += 0.001 * (idx + 1) * (1 + dangerLevel * 4);
+                r.rotation.y += 0.0015 * (idx + 1) * (1 + dangerLevel * 4);
+                r.scale.setScalar(r.baseScale + Math.sin(time * (2 + dangerLevel * 10) + idx) * 0.03 * (1 + dangerLevel * 3));
+            });
+
+            dustLayers[0].rotation.y = time * 0.05;
+            dustLayers[0].rotation.z = time * 0.02;
+            dustLayers[1].rotation.y = -time * 0.03;
+            dustLayers[1].rotation.x = time * 0.04;
+            dustLayers[2].rotation.y = time * 0.01;
+
+            if (!isGameOver) {
+                if (maxGridDist >= MAX_RADIUS - 1) { 
+                    const pulse = (Math.sin(Date.now() / 100) + 1) / 2; 
+                    dangerOverlay.style.boxShadow = `inset 0 0 ${100 + pulse * 100}px rgba(255, 0, 0, ${0.4 + pulse * 0.4})`;
+                    coreMesh.material.emissive.setHex(0xff0000);
+                    coreMesh.material.emissiveIntensity = pulse;
+                } else if (maxGridDist >= MAX_RADIUS - 2) { 
+                    const pulse = (Math.sin(Date.now() / 300) + 1) / 2; 
+                    dangerOverlay.style.boxShadow = `inset 0 0 ${50 + pulse * 50}px rgba(255, 60, 0, ${0.1 + pulse * 0.2})`;
+                    coreMesh.material.emissive.setHex(0xff5500);
+                    coreMesh.material.emissiveIntensity = pulse * 0.5;
+                } else {
+                    dangerOverlay.style.boxShadow = `inset 0 0 0px rgba(255, 0, 0, 0)`;
+                    coreMesh.material.emissiveIntensity = 0;
+                }
+            }
+
+            const targetCamDist = Math.max(18, maxVisualDist * 2.1 + 5);
+            const currentCamDist = camera.position.length();
+            camera.position.setLength(currentCamDist + (targetCamDist - currentCamDist) * 0.05);
+
+            for (const block of blocks) block.mesh.position.lerp(block.targetPos, 0.15);
+
+            for(let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.position.add(p.velocity);
+                p.rotation.x += p.rotationSpeed.x;
+                p.rotation.y += p.rotationSpeed.y;
+                p.life -= 0.03;
+                p.material.opacity = p.life;
+                p.scale.setScalar(p.life);
+                if(p.life <= 0) {
+                    scene.remove(p);
+                    particles.splice(i, 1);
+                }
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        requestAnimationFrame(animate);
+
+        // --- 8. FLOW CONTROL ---
+        function scheduleNextSpawn() {
+            if (isGameOver) return;
+            spawnBlock();
+            spawnIntervalTime = Math.max(MIN_INTERVAL, spawnIntervalTime * 0.99);
+            spawnerTimeoutId = setTimeout(scheduleNextSpawn, spawnIntervalTime);
+        }
+
+        function startGame() {
+            isGameOver = false;
+            score = 0;
+            scoreElement.innerText = `Score: 0`;
+            spawnIntervalTime = 1500;
+            currentBiome = BIOMES.COSMOS;
+            biomeElement.innerText = `Sector: ${currentBiome.name}`;
+            
+            initAudio(); 
+            
+            blocks.forEach(b => scene.remove(b.mesh));
+            blocks = [];
+            grid.clear();
+            dangerOverlay.style.boxShadow = `inset 0 0 0px rgba(255, 0, 0, 0)`;
+            coreMesh.material.emissiveIntensity = 0;
+            
+            startScreen.style.display = 'none';
+            gameOverScreen.style.display = 'none';
+
+            for(let i = 0; i < 26; i++) setTimeout(spawnBlock, i * 80);
+            spawnerTimeoutId = setTimeout(scheduleNextSpawn, spawnIntervalTime);
+        }
+
+        document.getElementById('startBtn').addEventListener('click', startGame);
+        document.getElementById('replayBtn').addEventListener('click', startGame);
+
+    </script>
+</body>
+</html>
