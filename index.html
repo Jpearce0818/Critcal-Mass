@@ -1,7 +1,3 @@
-The game actually already has a saving mechanism built-in using your browser's localStorage—but there is a catch in how I wrote it.
-Currently, it only saves your high score when you die and hit the "Game Over" screen. If you beat your high score but then close the tab or refresh the page before losing, that new score gets wiped out. Also, localStorage is tied to your specific browser and device, so your phone and your computer will maintain separate high scores.
-To fix the saving issue, we can change the logic so the game actively saves your high score in real-time every single time you score points. This way, even if you accidentally close the tab mid-game, your new high score is safely locked in.
-Here is the updated code. I moved the high score saving logic directly into the combo calculation. Just overwrite your index.html file in GitHub with this:
 <!DOCTYPE html>
 <html lang="en">
 <head>
