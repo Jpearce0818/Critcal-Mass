@@ -1,16 +1,10 @@
+The game actually already has a saving mechanism built-in using your browser's localStorage—but there is a catch in how I wrote it.
+Currently, it only saves your high score when you die and hit the "Game Over" screen. If you beat your high score but then close the tab or refresh the page before losing, that new score gets wiped out. Also, localStorage is tied to your specific browser and device, so your phone and your computer will maintain separate high scores.
+To fix the saving issue, we can change the logic so the game actively saves your high score in real-time every single time you score points. This way, even if you accidentally close the tab mid-game, your new high score is safely locked in.
+Here is the updated code. I moved the high score saving logic directly into the combo calculation. Just overwrite your index.html file in GitHub with this:
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/": "https://esm.sh/three@^0.186.0/",
-    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-  }
-}
-</script>
-
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Stellar Core - 3D Planet Puzzle</title>
@@ -79,7 +73,14 @@
         button.gameBtn:hover { transform: translateY(-2px) scale(1.03); box-shadow: 0 14px 30px rgba(0, 230, 118, 0.55); filter: brightness(1.1); }
         button.gameBtn:active { transform: translateY(1px) scale(0.98); }
     </style>
-    
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
 </head>
 <body>
     <div id="dangerOverlay"></div>
@@ -119,9 +120,21 @@
         let blocks = []; 
         let maxGridDist = 0; 
 
+        const scoreElement = document.getElementById('score');
         const highScoreElement = document.getElementById('highScore');
         const biomeElement = document.getElementById('biomeIndicator');
+        const finalScoreElement = document.getElementById('finalScore');
+        
+        // Initialize high score display
         highScoreElement.innerText = `Best: ${highScore}`;
+
+        function checkAndSaveHighScore() {
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('stellar_high_score', highScore);
+                highScoreElement.innerText = `Best: ${highScore}`;
+            }
+        }
 
         // --- BIOMES DEFINITION ---
         const BIOMES = {
@@ -387,13 +400,6 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
 
-        // --- 2. GAME LOGIC ARRAYS ---
-        const scoreElement = document.getElementById('score');
-        const startScreen = document.getElementById('startScreen');
-        const gameOverScreen = document.getElementById('gameOverScreen');
-        const finalScoreElement = document.getElementById('finalScore');
-        const dangerOverlay = document.getElementById('dangerOverlay');
-        
         const faceDirections = [
             new THREE.Vector3(1, 0, 0), new THREE.Vector3(-1, 0, 0),
             new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, -1, 0),
@@ -435,20 +441,18 @@
             }
         }
 
-        // Updated Floating Popup: Smaller text, out of the way of the main cluster
         function createFloatingPopup(text, position, color = '#ffffff', scale = 1) {
             const el = document.createElement('div');
             el.className = 'floating-popup';
             el.innerText = text;
             el.style.color = color;
-            // Base size drastically reduced from 20px to 11px
             el.style.fontSize = `${11 * scale}px`;
             document.body.appendChild(el);
 
             const pos = position.clone();
             let opacity = 1.0;
             let currentYOffset = 0;
-            let currentXOffset = 0; // Added for horizontal drift
+            let currentXOffset = 0; 
 
             function updatePopup() {
                 if (opacity <= 0) {
@@ -456,8 +460,6 @@
                     return;
                 }
                 const screenPos = pos.clone().add(new THREE.Vector3(currentXOffset, currentYOffset, 0)).project(camera);
-                
-                // Add a permanent flat pixel offset (+45x, -45y) to push it diagonally out of the cursor/block's way
                 const x = ((screenPos.x * 0.5 + 0.5) * window.innerWidth) + 45;
                 const y = (-(screenPos.y * 0.5) + 0.5) * window.innerHeight - 45;
 
@@ -466,7 +468,7 @@
                 el.style.opacity = opacity;
 
                 currentYOffset += 0.04; 
-                currentXOffset += 0.02; // Causes the text to gently drift to the right over time
+                currentXOffset += 0.02; 
                 opacity -= 0.025;
                 requestAnimationFrame(updatePopup);
             }
@@ -519,11 +521,8 @@
             clearTimeout(spawnerTimeoutId);
             if (seqTimeoutId) clearTimeout(seqTimeoutId);
             
-            if (score > highScore) {
-                highScore = score;
-                localStorage.setItem('stellar_high_score', highScore);
-                highScoreElement.innerText = `Best: ${highScore}`;
-            }
+            // Final high score check on game over
+            checkAndSaveHighScore();
 
             finalScoreElement.innerText = `Final Score: ${score}`;
             gameOverScreen.style.display = 'flex';
@@ -647,9 +646,11 @@
                 const points = count * 10 * comboMultiplier;
                 score += points;
 
+                // Live high score save
+                checkAndSaveHighScore();
+
                 if (comboMultiplier > 1) {
                     playSpecialSound('combo');
-                    // Multiplier scaled down significantly so text remains tiny but legible
                     createFloatingPopup(`x${comboMultiplier}! +${points}`, startBlock.mesh.position, '#ffea00', 1.0 + comboMultiplier * 0.15);
                 } else {
                     createFloatingPopup(`+${points}`, startBlock.mesh.position, '#ffffff', 1.0);
@@ -861,3 +862,4 @@
     </script>
 </body>
 </html>
+
