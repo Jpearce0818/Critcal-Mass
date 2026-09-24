@@ -2,14 +2,31 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stellar Core - 3D Planet Puzzle</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Stellar Core</title>
+
+    <!-- iOS & PWA Native App Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Stellar Core">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#0b0b1a">
+    <link rel="apple-touch-icon" href="icon.png">
+
     <style>
-        body { margin: 0; overflow: hidden; background-color: #0b0b1a; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; user-select: none; }
+        body { 
+            margin: 0; 
+            overflow: hidden; 
+            background-color: #0b0b1a; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+        }
         canvas { display: block; touch-action: none; }
         
         #hud {
-            position: absolute; top: 20px; left: 20px; color: white; pointer-events: none; z-index: 20;
+            position: absolute; top: 24px; left: 20px; color: white; pointer-events: none; z-index: 20;
             display: flex; flex-direction: column; gap: 4px;
         }
         #score { font-size: 28px; font-weight: 800; text-shadow: 0 0 12px rgba(255,255,255,0.6); }
@@ -17,7 +34,7 @@
         #biomeIndicator { font-size: 14px; text-transform: uppercase; letter-spacing: 2px; color: #80deea; font-weight: bold; margin-top: 4px; }
         
         #muteBtn {
-            position: absolute; top: 20px; right: 20px;
+            position: absolute; top: 24px; right: 20px;
             background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.3);
             color: white; font-size: 22px; padding: 10px 16px; border-radius: 12px;
             cursor: pointer; z-index: 20; backdrop-filter: blur(8px);
@@ -49,16 +66,17 @@
         #gameOverScreen { display: none; }
         
         h1 {
-            font-size: 60px; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 6px;
+            font-size: 54px; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 6px;
             text-shadow: 0 0 30px rgba(120, 180, 255, 0.6);
             background: linear-gradient(45deg, #fff, #80deea); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            text-align: center;
         }
         #gameOverScreen h1 {
             background: linear-gradient(45deg, #ff4444, #ff8a80); -webkit-background-clip: text; -webkit-text-fill-color: transparent;
             text-shadow: 0 0 30px rgba(255, 68, 68, 0.6);
         }
         
-        p { font-size: 22px; margin: 0 0 32px 0; color: #b0bec5; font-weight: 300; }
+        p { font-size: 20px; margin: 0 20px 32px 20px; color: #b0bec5; font-weight: 300; text-align: center; }
 
         button.gameBtn {
             background: linear-gradient(135deg, #00e676, #00b0ff); color: white; border: none;
@@ -121,7 +139,6 @@
         const biomeElement = document.getElementById('biomeIndicator');
         const finalScoreElement = document.getElementById('finalScore');
         
-        // Initialize high score display
         highScoreElement.innerText = `Best: ${highScore}`;
 
         function checkAndSaveHighScore() {
@@ -140,7 +157,7 @@
         };
         let currentBiome = BIOMES.COSMOS;
 
-        // --- SPACE FUNK AUDIO ENGINE ---
+        // --- SPACE FUNK ADAPTIVE AUDIO ENGINE ---
         let audioCtx;
         let audioSetupDone = false;
         let isMuted = false;
@@ -517,7 +534,6 @@
             clearTimeout(spawnerTimeoutId);
             if (seqTimeoutId) clearTimeout(seqTimeoutId);
             
-            // Final high score check on game over
             checkAndSaveHighScore();
 
             finalScoreElement.innerText = `Final Score: ${score}`;
@@ -642,7 +658,6 @@
                 const points = count * 10 * comboMultiplier;
                 score += points;
 
-                // Live high score save
                 checkAndSaveHighScore();
 
                 if (comboMultiplier > 1) {
@@ -758,7 +773,6 @@
                 if (gDist > maxGridDist) maxGridDist = gDist;
             }
 
-            // Danger Calculations
             let dangerLevel = Math.max(0, maxGridDist - 1) / (MAX_RADIUS - 1);
             dangerLevel = Math.min(1, dangerLevel); 
             
@@ -858,4 +872,3 @@
     </script>
 </body>
 </html>
-
