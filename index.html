@@ -547,10 +547,10 @@
             if (isGameOver) return;
 
             let activeColorCount = 3;
-            if (score >= 2500) activeColorCount = 8;
-            else if (score >= 1200) activeColorCount = 6;
-            else if (score >= 500) activeColorCount = 5;
-            else if (score >= 150) activeColorCount = 4;
+            if (score >= 3500) activeColorCount = 8;
+            else if (score >= 2500) activeColorCount = 6;
+            else if (score >= 1500) activeColorCount = 5;
+            else if (score >= 500) activeColorCount = 4;
             
             const surfaceSpots = getEmptySurfaceSpots();
             if (surfaceSpots.length === 0) return; 
@@ -568,7 +568,7 @@
             const material = new THREE.MeshStandardMaterial({ 
                 color: colorHex, 
                 roughness: 0.2, 
-                metalness: 0.1
+                metalness: 0.2
             });
 
             const mesh = new THREE.Mesh(coreGeometry, material);
@@ -810,7 +810,7 @@
                 }
             }
 
-            const targetCamDist = Math.max(18, maxVisualDist * 2.1 + 5);
+            const targetCamDist = Math.max(20, maxVisualDist * 2.1 + 5);
             const currentCamDist = camera.position.length();
             camera.position.setLength(currentCamDist + (targetCamDist - currentCamDist) * 0.05);
 
