@@ -1,1 +1,1 @@
-# Critcal-Mass
+# Critical Mass
